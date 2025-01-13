@@ -8,6 +8,20 @@ interface EmailSubscription {
   category: string;
 }
 
+interface EmailMessage {
+  id: string;
+  payload: {
+    headers: { name: string; value: string }[];
+    body: { data: string };
+    parts?: EmailPart[];
+  };
+}
+
+interface EmailPart {
+  body: { data: string };
+  parts?: EmailPart[];
+}
+
 export class EmailScanner {
   private token: string;
 
@@ -17,17 +31,15 @@ export class EmailScanner {
 
   async scanEmails(): Promise<EmailSubscription[]> {
     try {
-      // Search for subscription-related emails
       const query = 'subject:(subscription OR invoice OR billing OR renewal)';
       const messages = await this.searchEmails(query);
-      
+
       if (!messages?.length) {
         return [];
       }
 
       const subscriptions: EmailSubscription[] = [];
-      
-      // Process each email
+
       for (const message of messages) {
         const email = await this.getEmail(message.id);
         if (!email) continue;
@@ -63,7 +75,7 @@ export class EmailScanner {
     return data.messages || [];
   }
 
-  private async getEmail(messageId: string) {
+  private async getEmail(messageId: string): Promise<EmailMessage> {
     const response = await fetch(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}`,
       {
@@ -80,7 +92,7 @@ export class EmailScanner {
     return response.json();
   }
 
-  private extractSubscriptionInfo(email: any): EmailSubscription | null {
+  private extractSubscriptionInfo(email: EmailMessage): EmailSubscription | null {
     const subject = this.getHeader(email, 'subject');
     const body = this.decodeBody(email);
 
@@ -88,7 +100,6 @@ export class EmailScanner {
       return null;
     }
 
-    // Check if this is a subscription-related email
     const isSubscriptionEmail = DETECTION_PATTERNS.subscriptionTerms.some(term =>
       subject.toLowerCase().includes(term.toLowerCase()) ||
       body.toLowerCase().includes(term.toLowerCase())
@@ -98,22 +109,14 @@ export class EmailScanner {
       return null;
     }
 
-    // Extract service name
-    const serviceName = this.extractServiceName(subject, body);
+    const serviceName = this.extractServiceName(email, subject, body);
     if (!serviceName) {
       return null;
     }
 
-    // Extract price
     const price = this.extractPrice(body);
-
-    // Extract billing cycle
     const billingCycle = this.extractBillingCycle(body);
-
-    // Extract next billing date
     const nextBillingDate = this.extractNextBillingDate(body);
-
-    // Categorize subscription
     const category = this.categorizeSubscription(serviceName, body);
 
     return {
@@ -125,17 +128,17 @@ export class EmailScanner {
     };
   }
 
-  private getHeader(email: any, name: string): string | null {
+  private getHeader(email: EmailMessage, name: string): string | null {
     const header = email.payload.headers.find(
-      (h: any) => h.name.toLowerCase() === name.toLowerCase()
+      (h) => h.name.toLowerCase() === name.toLowerCase()
     );
     return header ? header.value : null;
   }
 
-  private decodeBody(email: any): string {
+  private decodeBody(email: EmailMessage): string {
     let body = '';
 
-    const extractParts = (part: any) => {
+    const extractParts = (part: EmailPart) => {
       if (part.body.data) {
         body += Buffer.from(part.body.data, 'base64').toString();
       }
@@ -154,8 +157,7 @@ export class EmailScanner {
     return body;
   }
 
-  private extractServiceName(subject: string, body: string): string | null {
-    // Try to extract from common patterns in subject
+  private extractServiceName(email: EmailMessage, subject: string, body: string): string | null {
     const subjectPatterns = [
       /Your\s+(.+?)\s+subscription/i,
       /(.+?)\s+invoice/i,
@@ -170,7 +172,6 @@ export class EmailScanner {
       }
     }
 
-    // Try to extract from sender domain
     const fromHeader = this.getHeader(email, 'from');
     if (fromHeader) {
       const domainMatch = fromHeader.match(/@(.+?)\./i);
@@ -183,12 +184,9 @@ export class EmailScanner {
   }
 
   private cleanServiceName(name: string): string {
-    return name
-      .replace(/[^\w\s-]/g, '')
-      .split(/[\s-]+/)
+    return name.replace(/[^\w\s-]/g, '').split(/[\s-]+/)
       .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-      .join(' ')
-      .trim();
+      .join(' ').trim();
   }
 
   private extractPrice(body: string): number | null {
@@ -207,77 +205,26 @@ export class EmailScanner {
 
   private extractBillingCycle(body: string): 'monthly' | 'yearly' | 'quarterly' {
     const text = body.toLowerCase();
-    
-    if (text.includes('per year') || 
-        text.includes('/year') || 
-        text.includes('annually') ||
-        text.includes('yearly')) {
-      return 'yearly';
-    }
-    
-    if (text.includes('quarterly') || 
-        text.includes('every 3 months') || 
-        text.includes('/quarter')) {
-      return 'quarterly';
-    }
-    
+    if (text.includes('per year') || text.includes('/year') || text.includes('annually')) return 'yearly';
+    if (text.includes('quarterly') || text.includes('every 3 months')) return 'quarterly';
     return 'monthly';
   }
 
   private extractNextBillingDate(body: string): string | null {
     const datePatterns = [
-      /next\s+billing\s+date:\s*([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i,
-      /next\s+payment:\s*([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i,
-      /renews?\s+on\s+([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i
+      /next\s+billing\s+date:\s*([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i
     ];
-
     for (const pattern of datePatterns) {
       const match = body.match(pattern);
-      if (match?.[1]) {
-        const date = new Date(match[1]);
-        if (!isNaN(date.getTime())) {
-          return date.toISOString();
-        }
-      }
+      if (match?.[1]) return new Date(match[1]).toISOString();
     }
-
     return null;
   }
 
   private categorizeSubscription(serviceName: string, body: string): string {
     const text = `${serviceName} ${body}`.toLowerCase();
-    
-    if (text.includes('stream') || 
-        text.includes('video') || 
-        text.includes('watch')) {
-      return 'streaming';
-    }
-    
-    if (text.includes('music') || 
-        text.includes('audio')) {
-      return 'music';
-    }
-    
-    if (text.includes('game') || 
-        text.includes('gaming')) {
-      return 'gaming';
-    }
-    
-    if (text.includes('cloud') || 
-        text.includes('storage')) {
-      return 'cloud';
-    }
-    
-    if (text.includes('productivity') || 
-        text.includes('business')) {
-      return 'productivity';
-    }
-    
-    if (text.includes('software') || 
-        text.includes('app')) {
-      return 'software';
-    }
-    
+    if (text.includes('stream')) return 'streaming';
+    if (text.includes('music')) return 'music';
     return 'other';
   }
 }
