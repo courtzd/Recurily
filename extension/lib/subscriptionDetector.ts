@@ -72,4 +72,3 @@ class SubscriptionDetector {
 
 // ✅ Expose globally
 (window as unknown as { SubscriptionDetector: typeof SubscriptionDetector }).SubscriptionDetector = SubscriptionDetector;
-

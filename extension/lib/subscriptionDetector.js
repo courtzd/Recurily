@@ -1,122 +1,115 @@
 console.log("🟢 Subscription Detector Loading");
 
-// Immediately expose to window object
-(function() {
-  class SubscriptionDetector {
+class SubscriptionDetector {
     constructor(document, url) {
-      console.log("🔨 Creating SubscriptionDetector instance for:", url);
-      this.document = document;
-      this.url = url;
-      this.hasScanned = false;
-      this.lastResult = null;
+        console.log("🔨 Creating SubscriptionDetector instance for:", url);
+        this.document = document;
+        this.url = url;
+        this.hasScanned = false;
     }
 
     detect() {
-      if (this.hasScanned) {
-        console.log("Already scanned this page");
-        return this.lastResult;
-      }
-
-      console.log("🔍 Scanning for subscription elements...");
-
-      // Define detection patterns
-      const subscriptionKeywords = [
-        "subscribe", "membership", "pricing", "plan", "billing",
-        "free trial", "subscription", "payment", "sign up", "join now",
-        "monthly", "yearly", "annual"
-      ];
-
-      const pricePatterns = [
-        /\$\d+(\.\d{2})?\s*(per\s*month|monthly|mo)/i,
-        /\$\d+(\.\d{2})?\s*(per\s*year|annually|yr)/i,
-        /€\d+(\.\d{2})?/i,
-        /£\d+(\.\d{2})?/i,
-        /US\$\d+(\.\d{2})?/i
-      ];
-
-      // Site-specific selectors
-      const siteSelectors = {
-        common: [
-          '.pricing', '.subscription', '.plan-details', '.membership',
-          '[class*="pricing"]', '[class*="subscription"]', '[class*="plan"]',
-          '[class*="membership"]', '[data-testid*="pricing"]'
-        ].join(','),
-        forms: [
-          'form[action*="subscribe"]',
-          'form[action*="payment"]',
-          'form[action*="billing"]'
-        ].join(',')
-      };
-
-      try {
-        // Check for site-specific elements first
-        const subscriptionElements = this.document.querySelectorAll(siteSelectors.common);
-        const subscriptionForms = this.document.querySelectorAll(siteSelectors.forms);
-
-        if (subscriptionElements.length > 0 || subscriptionForms.length > 0) {
-          const result = {
-            type: "subscription_element",
-            content: subscriptionElements.length > 0 ? 
-                    subscriptionElements[0].textContent.trim() : 
-                    "Subscription form detected",
-            url: this.url,
-            elements: Array.from(subscriptionElements).map(el => ({
-              text: el.textContent.trim(),
-              type: el.tagName.toLowerCase()
-            }))
-          };
-          this.lastResult = result;
-          this.hasScanned = true;
-          return result;
+        if (this.hasScanned) {
+            return null;
         }
 
-        // Check for subscription keywords
-        for (const keyword of subscriptionKeywords) {
-          const elements = this.document.querySelectorAll('a, button, div, span, p, h1, h2, h3, h4, h5, h6');
-          for (const element of elements) {
-            if (element.textContent && element.textContent.toLowerCase().includes(keyword)) {
-              console.log(`🔍 Found subscription keyword: "${keyword}" in element:`, element);
-              const result = {
-                type: "keyword_match",
-                content: element.textContent.trim(),
-                url: this.url,
-                keyword: keyword
-              };
-              this.lastResult = result;
-              this.hasScanned = true;
-              return result;
+        console.log("🔍 Scanning for subscription elements...");
+
+        // Netflix-specific detection
+        if (this.url.includes('netflix.com')) {
+            console.log("🎬 Detecting Netflix subscription...");
+            const netflixSelectors = [
+                '.account-section',
+                '.profile-hub',
+                '.membership-section',
+                '[data-uia*="plan"]',
+                '[data-uia*="subscription"]',
+                '.plan-label',
+                '.plan-price'
+            ];
+            
+            for (const selector of netflixSelectors) {
+                const element = this.document.querySelector(selector);
+                if (element) {
+                    console.log(`Found Netflix element: ${selector}`, element);
+                    element.style.border = "2px solid red";
+                    element.style.backgroundColor = "rgba(255, 0, 0, 0.1)";
+                    
+                    this.hasScanned = true;
+                    return {
+                        type: "subscription",
+                        platform: "Netflix",
+                        content: element.textContent.trim(),
+                        url: this.url
+                    };
+                }
             }
-          }
         }
 
-        // Check for pricing patterns
-        const bodyText = this.document.body.innerText;
-        for (const pattern of pricePatterns) {
-          const matches = bodyText.match(pattern);
-          if (matches) {
-            console.log(`💰 Found price pattern: "${matches[0]}"`);
-            const result = {
-              type: "price",
-              content: matches[0],
-              url: this.url
-            };
-            this.lastResult = result;
-            this.hasScanned = true;
-            return result;
-          }
+        // General subscription detection
+        const subscriptionKeywords = [
+            "subscribe", "membership", "pricing", "plan", "billing",
+            "free trial", "subscription", "payment", "sign up", "join now",
+            "monthly", "yearly", "annual"
+        ];
+
+        const pricePatterns = [
+            /\$\d+(\.\d{2})?\s*(per\s*month|monthly|mo)/i,
+            /\$\d+(\.\d{2})?\s*(per\s*year|annually|yr)/i,
+            /€\d+(\.\d{2})?/i,
+            /£\d+(\.\d{2})?/i,
+            /USD\s*\d+(\.\d{2})?/i
+        ];
+
+        try {
+            // Check for subscription keywords
+            const elements = this.document.querySelectorAll('a, button, div, span, p, h1, h2, h3, h4, h5, h6');
+            
+            for (const element of elements) {
+                if (!element.textContent) continue;
+                
+                const text = element.textContent.toLowerCase();
+                const matchedKeyword = subscriptionKeywords.find(keyword => text.includes(keyword));
+                
+                if (matchedKeyword) {
+                    console.log(`Found subscription keyword: "${matchedKeyword}" in:`, element);
+                    element.style.border = "2px solid red";
+                    element.style.backgroundColor = "rgba(255, 0, 0, 0.1)";
+                    
+                    this.hasScanned = true;
+                    return {
+                        type: "subscription",
+                        content: element.textContent.trim(),
+                        keyword: matchedKeyword,
+                        url: this.url
+                    };
+                }
+            }
+
+            // Check for price patterns
+            const bodyText = this.document.body.innerText;
+            for (const pattern of pricePatterns) {
+                const matches = bodyText.match(pattern);
+                if (matches) {
+                    console.log(`Found price pattern: "${matches[0]}"`);
+                    this.hasScanned = true;
+                    return {
+                        type: "price",
+                        content: matches[0],
+                        url: this.url
+                    };
+                }
+            }
+
+        } catch (error) {
+            console.error('Error during detection:', error);
         }
 
-      } catch (error) {
-        console.error('❌ Error during detection:', error);
-      }
-
-      console.log('❌ No subscription elements detected');
-      this.hasScanned = true;
-      return null;
+        this.hasScanned = true;
+        return null;
     }
-  }
+}
 
-  // Expose to window object
-  window.SubscriptionDetector = SubscriptionDetector;
-  console.log("✅ SubscriptionDetector attached to window:", typeof window.SubscriptionDetector);
-})();
+// Expose to window object
+window.SubscriptionDetector = SubscriptionDetector;
+console.log("✅ SubscriptionDetector attached to window:", typeof window.SubscriptionDetector);
